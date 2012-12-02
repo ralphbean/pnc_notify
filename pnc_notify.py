@@ -6,6 +6,11 @@
 
 # Assumptions:  The calendar time-zone is the local time-zone.
 
+# Settings:
+
+MIN_PHONE_NUMBER_DIGITS = 10
+MAX_PHONE_NUMBER_DIGITS = 10
+
 import datetime
 
 # A type object of a datetime.datetime for comparison to other types.
@@ -24,6 +29,44 @@ import commands
 import os
 import sys           # for sys.argv to run non-interactively from the command-line.
 
+
+def parse_phone(description):
+    """Parses a description field of an ical ics event to find a line with a phone number on it.
+
+        DESCRIPTION:This is my first line of description.\nThis is the second.\nher
+         e is a phone number on the third 585 555 5555 blah blah on phone number lin
+         e\nphone: 123 456 7980\nand one last line
+
+        "\n" is really a \ followed by "n".
+
+    """
+
+    desc_lines = description.split("\n")
+
+    # Check each line for a phone number.  It should be on a line by itself!
+    for line in desc_lines:
+        # Change to lower case.
+        line = line.lower()
+        # Strip whitespace.
+        line = line.strip()
+        # Does the line start with "phone" or "telephone"
+        if line.startswith("phone") or line.startswith("telephone"):
+            # This could be a phone number to contact by SMS.
+        
+            phone_number = ""
+            for one_character in line:
+                if one_character.isdigit():
+                    phone_number += one_character
+
+            if len(phone_number) >= MIN_PHONE_NUMBER_DIGITS and \
+               len(phone_number) <= MAX_PHONE_NUMBER_DIGITS:
+                # This is possibly a correct phone number.  Return it.
+                return phone_number
+
+    # No phone numbers found.
+    return None
+
+
 def create_message(ical_entry):
     """This creates message text and returns it, along with the SMS address.
 
@@ -31,7 +74,7 @@ def create_message(ical_entry):
     
     pass
 
-    return # [message_text, sms_address]
+    return []  # [message_text, sms_address]
 
 # Parse the command line args (crude).
 command_line_args = sys.argv[1:]
@@ -79,7 +122,7 @@ class logger:
 
         try:
             f = open(file_name, "r")
-            self.uid_file_entries = f.readlines()
+            self.UID_file_entries = f.readlines()
 
         except:
             # File did not exist.  Create an empty file and return an empty list.
@@ -94,7 +137,7 @@ class logger:
 
         """
 
-        for entry in self.uid_file_entries:
+        for entry in self.UID_file_entries:
             if entry["UID"] == UID:
                 return True
 
@@ -120,7 +163,7 @@ class logger:
                      "sent date" : sent_date, \
                     }
 
-            self.uid_file_entries.append(entry)
+            self.UID_file_entries.append(entry)
 
             return 0
 
@@ -129,28 +172,22 @@ class logger:
             return -1
 
 
+################################################################################
+# CRON SCRIPT                                                                  #
+################################################################################
+
+# Create a logger, which will read a log file if it exists.
+Logger = logger(ALREADY_NOTIFIED_FILE_NAME)
 
 # Read the ical-standard file.
-pnc_cal = Calendar.from_ical(open('example_cal.ics','rb').read())
-
-# Read the file containing appointments for which the mom was already notified.
-read_already_notified_file(ALREADY_NOTIFIED_FILE_NAME)
+pnc_cal = Calendar.from_ical(open(ICS_FILE_NAME,'rb').read())
 
 for component in pnc_cal.walk():
-    #print component.name 
-    # VEVENT({'STATUS': vText(u'CONFIRMED'), 'ATTENDEE': vCalAddress('mailto:1avsv0nep20o8p8e3t70r0hguk@group.calendar.google.com'), 'UID': vText(u'terh697is5qaobrkig1jif2ja8@google.com'), 'CREATED': <icalendar.prop.vDDDTypes instance at 0xd24098>, 'SEQUENCE': 0, 'TRANSP': vText(u'OPAQUE'), 'DTSTAMP': <icalendar.prop.vDDDTypes instance at 0xd11ef0>, 'SUMMARY': vText(u'dr appt.'), 'LAST-MODIFIED': <icalendar.prop.vDDDTypes instance at 0xd240e0>, 'LOCATION': vText(u''), 'DTEND': <icalendar.prop.vDDDTypes instance at 0xd11ea8>, 'DTSTART': <icalendar.prop.vDDDTypes instance at 0xd11e60>, 'DESCRIPTION': vText(u'call asap if I need to cancel')}) <class 'icalendar.cal.Event'><====
-    #  a 2012-06-11 20:00:00+00:00
 
     # Get the start date of this event (date of check-up); check-ups are probably one day long.
     print "--------------------------------------------------------------------------------\n"
-    # print "\n\n" + str(component) + " " + str(type(component)) + "<===="
-    # If this is a calendar event, not timezone info, etc...
     if component.name == "VEVENT": 
-        #for item in component:
-            #print item
-        # raw_input(dir(component))
         pnc_date_object = component['DTSTART']
-        # print dir(pnc_date_object)
 
         # This is either a datetime.datetime object with a time, or a
         # datetime.date object that must be converted to datetime.date
@@ -161,47 +198,77 @@ for component in pnc_cal.walk():
         print "checkup_time: ", checkup_time 
         if type(checkup_date) == DATETIME_TYPE: 
             delta_t = relativedelta.relativedelta(checkup_date, current_time_obj)
-            print "A"
         else:
             delta_t = relativedelta.relativedelta(checkup_date, current_date_only)
-            print "B"
             
-        # relativedelta issue:  If the relativedelta has no hours in it
+        # ISSUE: relativedelta issue:  If the relativedelta has no hours in it
         # (hours=0), then it cannot be compared to one with nonzero hours.  See
         # here:
         # http://stackoverflow.com/questions/11704341/comparing-dateutil-relativedelta
-        # Hence, the first "if":
+        # Hence, the second "if" below.
 
         if delta_t > ZERO_DELTA:
             if delta_t.hours == 0:
+                # The "hours" attribute is identically 0.
                 temp_delta_t               = delta_t               + ONE_HOUR_DELTA 
                 temp_NOTIFY_RELATIVE_DELTA = NOTIFY_RELATIVE_DELTA + ONE_HOUR_DELTA
-                should_notify = temp_delta_t < temp_NOTIFY_RELATIVE_DELTA 
+                should_notify = temp_delta_t > temp_NOTIFY_RELATIVE_DELTA 
             else:
                 # The time difference contains non-zero hours attribute.
-                should_notify = delta_t < NOTIFY_RELATIVE_DELTA 
+                should_notify = delta_t > NOTIFY_RELATIVE_DELTA 
 
         if should_notify:
             print "SHOULD NOTIFY"
 
             # Get the calendar event identifier to compare with notifications already sent.
-            uid = component['UID']
-            print uid
-
+            UID = component['UID']
+            print UID
 
             # Check the entries from the already-notified file, and eliminate any that have already been notified.
+            was_notified = Logger.get_was_notified(UID)
 
-            raw_input("press enter")
-        # Notify the mom.
+            was_notified = False # Debugging
+
+            if not was_notified:
+                # Get the summary.  On google calendar, this is the event title.
+                summary = component['SUMMARY']
+                print "summary:"
+                print summary
+
+                # Get the event description, which will contain the phone
+                # number and message primitives.  These primitives will be used
+                # to compose the message.  (The complete message itself does
+                # not need to be typed in the calendar; it will be constructed
+                # from these primitives.)
+                description = component['DESCRIPTION']
+
+                # The description should contain items formatted as 
+                # Example "DESCRIPTION" line:  (line breaks are coded as backslash-n.)
+                # DESCRIPTION:Get required number of order forms from Connie.\n(Do I h
+                #  ave them in my files or on the dept. website?)
+
+                # Get the phone number.  At the moment, the phone number should
+                # be on a separate line.  Not sure about using other fields in
+                # the ics format, such as guests, because some apps use these
+                # differently. (?)
+
+                phone_number = parse_phone(description) # Returned as a string.
+                print "phone number found: ", phone_number
+
+                if not phone_number == None:
+                    pass
+                
+
+            raw_input("debugging: press enter")
 
         # Make a message.
-        create_message(component)
+        the_message = create_message(component)
 
-        # Send the message (Twilio?)
+        # Send the message to the mom. (Twilio?)
+        #Sender.send(the_message)
 
         # Add this appointment ID to the already-notified file
-
-        already_notified_IDs.append(appointment_ID)
+        #logger.set_was_notified(UID, phone_number, appointment_date, sent_date)
 
         # Clean up the already-notified file:  Delete entries for appointments
         # in the past, and rewrite the file.
