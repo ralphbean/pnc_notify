@@ -3,32 +3,67 @@
 # Script to notify mothers of upcoming post-natal checkups.
 # Peace Corps Innovation Challenge 
 # http://innovationchallenge.peacecorps.gov/idea/51
+# https://github.com/adamhayes/pnc_notify
 
-# Assumptions:  The calendar time-zone is the local time-zone.
+# Assumptions:  The calendar time-zone is the local time-zone.  It is not clear
+# how this will function if it is not.
 
-# Settings:
-
-MIN_PHONE_NUMBER_DIGITS = 10
-MAX_PHONE_NUMBER_DIGITS = 10
+#################################
+# Geographically Local Settings #
+#################################
+                                #
+MIN_PHONE_NUMBER_DIGITS = 10    #
+MAX_PHONE_NUMBER_DIGITS = 10    #
+                                #
+#################################
 
 import datetime
-
-# A type object of a datetime.datetime for comparison to other types.
-DATETIME_TYPE = type(datetime.datetime(2000,1,1))
-UTC = datetime.tzinfo()
-
 from dateutil import relativedelta
 from dateutil import rrule
 from dateutil import parser
-
 import time
-
 from icalendar import Calendar, Event
-
 import commands
-import os
 import sys           # for sys.argv to run non-interactively from the command-line.
 
+################################################################################
+# Parse the command line args (crude).                                         #
+################################################################################
+command_line_args = sys.argv[1:]
+
+if not len(command_line_args) == 3:
+    print "Usage:"
+    print "  python pnc_notify.py  delta-t  already-notified-file-name  ics-calendar-file-name"
+    print "  where delta-t is in hours, e.g."
+    print "  python pnc_notify.py 24 notified.txt my_calendar.ics"
+    quit()
+
+# Need a minimum of 3 arguments, in this order:
+NOTIFY_DELTA_T, ALREADY_NOTIFIED_FILE_NAME, ICS_FILE_NAME = command_line_args
+# where notify_delta_t is in hours.  Moms will be notified once at most this
+# many hours before the appointment.
+
+# Create a relativedelta instance representing this NOTIFY_DELTA_T.
+NOTIFY_RELATIVE_DELTA = relativedelta.relativedelta(hours=int(NOTIFY_DELTA_T))
+
+################################################################################
+# Setup for the "relativedelta" time calculations.                             #
+################################################################################
+
+# A type object of a datetime.datetime for comparison to other types.
+DATETIME_TYPE = type(datetime.datetime(2000,1,1))
+
+ZERO_DELTA = relativedelta.relativedelta(hours=0)
+ONE_HOUR_DELTA = relativedelta.relativedelta(hours=1)
+
+# Get the current date and time.  With no arguments, time.ctime() returns the
+# local time as a string.
+current_time = time.ctime()
+current_time_obj = parser.parse(commands.getoutput("date"))
+current_date_only = datetime.date(current_time_obj.year, current_time_obj.month, current_time_obj.day)
+
+################################################################################
+################################################################################
 
 def parse_phone(description):
     """Parses a description field of an ical ics event to find a line with a phone number on it.
@@ -76,33 +111,6 @@ def create_message(ical_entry):
 
     return []  # [message_text, sms_address]
 
-# Parse the command line args (crude).
-command_line_args = sys.argv[1:]
-
-if not len(command_line_args) == 3:
-    print "Usage:"
-    print "  python pnc_notify.py  delta-t  already-notified-file-name  ics-calendar-file-name"
-    print "  where delta-t is in hours, e.g."
-    print "  python pnc_notify.py 24 notified.txt my_calendar.ics"
-    quit()
-
-# Need a minimum of 3 arguments, in this order:
-NOTIFY_DELTA_T, ALREADY_NOTIFIED_FILE_NAME, ICS_FILE_NAME = command_line_args
-# where notify_delta_t is in hours.  Moms will be notified once at most this
-# many hours before the appointment.
-
-# Create a relativedelta instance representing this NOTIFY_DELTA_T.
-NOTIFY_RELATIVE_DELTA = relativedelta.relativedelta(hours=int(NOTIFY_DELTA_T))
-ZERO_DELTA = relativedelta.relativedelta(hours=0)
-ONE_HOUR_DELTA = relativedelta.relativedelta(hours=1)
-
-# Get the current date and time.  With no arguments, time.ctime() returns the
-# local time as a string.
-current_time = time.ctime()
-
-current_time_obj = parser.parse(commands.getoutput("date"))
-current_date_only = datetime.date(current_time_obj.year, current_time_obj.month, current_time_obj.day)
-
 class logger:
     """Reads/writes IDs of appointments already sent to moms.
 
@@ -143,7 +151,7 @@ class logger:
 
         return False
 
-    def set_was_notified(self,UID,phone_number, appointment_date, sent_date):
+    def set_was_notified(self, UID, phone_number, appointment_date, sent_date):
         """Adds this notification to the notified-file, 
         
         {"UID":"some id string", "phone number":5855551234, "appointment date":"2012-11-5 09:15:00", "sent date":"2012-11-4 12:00:00"}
@@ -170,6 +178,29 @@ class logger:
         except:
 
             return -1
+
+    def prune_old_entries(self):
+        """Delete entries from the past, which wouldn't get sent in any case.
+
+        """
+
+        # Get current time.
+        pass
+        #delta_t = relativedelta.relativedelta(checkup_date, current_time_obj)
+
+
+
+    def write_out(self):
+        """Write the updated entries to the log file.
+
+        """
+
+        # Get rid of the entries from the past.
+        self.prune_old_entries()
+
+        # Write remaining entries to the file.
+        pass
+
 
 
 ################################################################################
@@ -257,29 +288,26 @@ for component in pnc_cal.walk():
 
                 if not phone_number == None:
                     pass
-                
 
-            raw_input("debugging: press enter")
+                    # Make a message.
+                    the_message = create_message(component)
 
-        # Make a message.
-        the_message = create_message(component)
+                    # Send the message to the mom. (Twilio?)
+                    #Sender.send(the_message)
 
-        # Send the message to the mom. (Twilio?)
-        #Sender.send(the_message)
-
-        # Add this appointment ID to the already-notified file
-        #logger.set_was_notified(UID, phone_number, appointment_date, sent_date)
-
-        # Clean up the already-notified file:  Delete entries for appointments
-        # in the past, and rewrite the file.
+                    print "Will log checkup on ",checkup_date 
+                    # Add this appointment ID to the already-notified file
+                    Logger.set_was_notified(UID, phone_number, checkup_date, current_date_only)
 
 
 
-# Notify each mom by SMS.
+        raw_input("debugging: press enter")
 
+print Logger.UID_file_entries
 
-# Clean up the already-notified file by deleting entries for appointments that are in the past.
-
+# Clean up the already-notified file:  Delete entries for appointments
+# in the past, and rewrite the file.
+pass
 
 
 
