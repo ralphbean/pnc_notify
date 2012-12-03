@@ -25,13 +25,16 @@ import time
 from icalendar import Calendar, Event
 import commands
 import sys           # for sys.argv to run non-interactively from the command-line.
+import pickle
+
 
 ################################################################################
 # Parse the command line args (crude).                                         #
 ################################################################################
+
 command_line_args = sys.argv[1:]
 
-if not len(command_line_args) == 3:
+if not len(command_line_args) >= 3:
     print "Usage:"
     print "  python pnc_notify.py  delta-t  already-notified-file-name  ics-calendar-file-name"
     print "  where delta-t is in hours, e.g."
@@ -39,9 +42,28 @@ if not len(command_line_args) == 3:
     quit()
 
 # Need a minimum of 3 arguments, in this order:
-NOTIFY_DELTA_T, ALREADY_NOTIFIED_FILE_NAME, ICS_FILE_NAME = command_line_args
+NOTIFY_DELTA_T, ALREADY_NOTIFIED_FILE_NAME, ICS_FILE_NAME = command_line_args[:3]
 # where notify_delta_t is in hours.  Moms will be notified once at most this
 # many hours before the appointment.
+
+################################################################################
+# Things for debugging only                                                    #
+################################################################################
+import pprint                                                                  #
+                                                                               # 
+# A debugging flag on the command line turns on extra output to stdout.        #
+if "-d" in command_line_args:                                                  #
+    DEBUGGING = True                                                           #
+else:                                                                          #
+    DEBUGGING = False                                                          #
+                                                                               # 
+def debug_print(thing):                                                        #
+    if DEBUGGING:                                                              #
+         print "DEBUGGING: "                                                   #
+         pprint.pprint(thing)                                                  #
+                                                                               # 
+################################################################################
+
 
 # Create a relativedelta instance representing this NOTIFY_DELTA_T.
 NOTIFY_RELATIVE_DELTA = relativedelta.relativedelta(hours=int(NOTIFY_DELTA_T))
@@ -116,6 +138,8 @@ class logger:
 
     File format is expected to be 
 
+        [{'sent date': datetime.date(2012, 12, 2), 'appointment date': datetime.datetime(2012, 12, 11, 15, 0, tzinfo=<UTC>), 'phone number': u'1234567980', 'UID': vText(u'm2jkmrmn81rtk0kk7m0khdpcr4@google.com')},...]
+
         {"UID":"some id string", "phone number":5855551234, "appointment date":"2012-11-5 09:15:00", "sent date":"2012-11-4 12:00:00"}
         ...
 
@@ -126,17 +150,25 @@ class logger:
     def __init__(self,file_name):
         """ Open/create the log file, and read all UIDs from it.
 
+        This now uses pickle for simplicity in case the data format is changed.
+
         """
 
         try:
-            f = open(file_name, "r")
-            self.UID_file_entries = f.readlines()
+            pickle_file = open(ALREADY_NOTIFIED_FILE_NAME, "rb")
+            self.UID_file_entries = pickle.load(pickle_file)
+            pickle_file.close()
+            debug_print("====>" + str(self.UID_file_entries))
 
         except:
             # File did not exist.  Create an empty file and return an empty list.
-            f = open(file_name, "w")
+            try:
+                f = open(file_name, "wb")
+                self.UID_file_entries = []
+                f.close()
+            except:
+                self.UID_file_entries = []
 
-        f.close()
 
     def get_was_notified(self,UID):
         """Checks the log for ical UID and returns True/False.
@@ -182,11 +214,29 @@ class logger:
     def prune_old_entries(self):
         """Delete entries from the past, which wouldn't get sent in any case.
 
+        Look for entries in this format (below) where the date or datetime of
+        the appointment are in the past.  Depending on whether the user put a
+        time in the ical data or not, this may be a datetime.date or a
+        datetime.datetime.
+        
+        [{'sent date': datetime.date(2012, 12, 2), 'appointment date': datetime.datetime(2012, 12, 11, 15, 0, tzinfo=<UTC>), 'phone number': u'1234567980', 'UID': vText(u'm2jkmrmn81rtk0kk7m0khdpcr4@google.com')},...]
         """
 
-        # Get current time.
-        pass
-        #delta_t = relativedelta.relativedelta(checkup_date, current_time_obj)
+        new_notified_list = []
+        #for i in range(len(self.UID_file_entries)):
+        for entry in self.UID_file_entries:
+            checkup_time = entry["appointment date"]
+            if type(checkup_date) == DATETIME_TYPE: 
+                delta_t = relativedelta.relativedelta(checkup_date, current_time_obj)
+            else:
+                delta_t = relativedelta.relativedelta(checkup_date, current_date_only)
+            if not delta_t < ZERO_DELTA:
+                # It is not in the past.  Put it in the new list.
+                new_notified_list.append(entry)
+        # Replace the original list with the new one.
+        self.UID_file_entries = new_notified_list
+
+        return 0
 
 
 
@@ -199,7 +249,16 @@ class logger:
         self.prune_old_entries()
 
         # Write remaining entries to the file.
-        pass
+        try:
+            pickle_file = open(ALREADY_NOTIFIED_FILE_NAME, "wb")
+            pickle.dump(self.UID_file_entries, pickle_file)
+            pickle_file.close()
+        except:
+            pickle_file.close()
+            return -1
+
+        pickle_file.close()
+        return 0
 
 
 
@@ -210,13 +269,16 @@ class logger:
 # Create a logger, which will read a log file if it exists.
 Logger = logger(ALREADY_NOTIFIED_FILE_NAME)
 
+debug_print("Already notified: ")
+debug_print(Logger.UID_file_entries)
+
 # Read the ical-standard file.
 pnc_cal = Calendar.from_ical(open(ICS_FILE_NAME,'rb').read())
 
 for component in pnc_cal.walk():
 
     # Get the start date of this event (date of check-up); check-ups are probably one day long.
-    print "--------------------------------------------------------------------------------\n"
+    debug_print("--------------------------------------------------------------------------------\n")
     if component.name == "VEVENT": 
         pnc_date_object = component['DTSTART']
 
@@ -226,7 +288,8 @@ for component in pnc_cal.walk():
 
         checkup_time = checkup_date.timetuple()
 
-        print "checkup_time: ", checkup_time 
+        debug_print("checkup_time: " + str(checkup_time))
+
         if type(checkup_date) == DATETIME_TYPE: 
             delta_t = relativedelta.relativedelta(checkup_date, current_time_obj)
         else:
@@ -249,22 +312,26 @@ for component in pnc_cal.walk():
                 should_notify = delta_t > NOTIFY_RELATIVE_DELTA 
 
         if should_notify:
-            print "SHOULD NOTIFY"
+            debug_print("This appointment is within the time window to notify.")
+        else:
+            debug_print("This appointment is NOT within the time window to notify.")
+
+        if should_notify:
 
             # Get the calendar event identifier to compare with notifications already sent.
             UID = component['UID']
-            print UID
+            debug_print("UID: " + str(UID))
 
             # Check the entries from the already-notified file, and eliminate any that have already been notified.
             was_notified = Logger.get_was_notified(UID)
 
-            was_notified = False # Debugging
+            #was_notified = False # Debugging
 
             if not was_notified:
                 # Get the summary.  On google calendar, this is the event title.
                 summary = component['SUMMARY']
-                print "summary:"
-                print summary
+                debug_print("SUMMARY:")
+                debug_print(summary)
 
                 # Get the event description, which will contain the phone
                 # number and message primitives.  These primitives will be used
@@ -284,31 +351,36 @@ for component in pnc_cal.walk():
                 # differently. (?)
 
                 phone_number = parse_phone(description) # Returned as a string.
-                print "phone number found: ", phone_number
+                debug_print("phone number found: " + str(phone_number))
 
                 if not phone_number == None:
-                    pass
 
                     # Make a message.
                     the_message = create_message(component)
 
                     # Send the message to the mom. (Twilio?)
+                    debug_print("SENDING MESSAGE NOW.")
                     #Sender.send(the_message)
 
-                    print "Will log checkup on ",checkup_date 
                     # Add this appointment ID to the already-notified file
                     Logger.set_was_notified(UID, phone_number, checkup_date, current_date_only)
 
+            else:
+                # Already notified in a previous execution.
+                pass
+                debug_print("NOT SENDING.")
 
 
-        raw_input("debugging: press enter")
+        if DEBUGGING:
+            raw_input("debugging: press enter")
 
-print Logger.UID_file_entries
-
-# Clean up the already-notified file:  Delete entries for appointments
-# in the past, and rewrite the file.
-pass
-
+debug_print("Finished scanning calendar.")
+debug_print(Logger.UID_file_entries)
+#Logger.prune_old_entries()  # NOT NECESSARY; it is done in the write_out.
+# Write the updated file of moms who were notified already.
+Logger.write_out()
+debug_print("Already notified: ")
+debug_print(Logger.UID_file_entries)
 
 
 
