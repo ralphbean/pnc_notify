@@ -156,18 +156,18 @@ class logger:
 
         try:
             pickle_file = open(ALREADY_NOTIFIED_FILE_NAME, "rb")
-            self.UID_file_entries = pickle.load(pickle_file)
+            self.already_notified = pickle.load(pickle_file)
             pickle_file.close()
-            debug_print("====>" + str(self.UID_file_entries))
+            debug_print("====>" + str(self.already_notified))
 
         except:
             # File did not exist.  Create an empty file and return an empty list.
             try:
                 f = open(file_name, "wb")
-                self.UID_file_entries = []
+                self.already_notified = []
                 f.close()
             except:
-                self.UID_file_entries = []
+                self.already_notified = []
 
 
     def get_was_notified(self,UID):
@@ -177,7 +177,7 @@ class logger:
 
         """
 
-        for entry in self.UID_file_entries:
+        for entry in self.already_notified:
             if entry["UID"] == UID:
                 return True
 
@@ -203,7 +203,7 @@ class logger:
                      "sent date" : sent_date, \
                     }
 
-            self.UID_file_entries.append(entry)
+            self.already_notified.append(entry)
 
             return 0
 
@@ -223,8 +223,7 @@ class logger:
         """
 
         new_notified_list = []
-        #for i in range(len(self.UID_file_entries)):
-        for entry in self.UID_file_entries:
+        for entry in self.already_notified:
             checkup_time = entry["appointment date"]
             if type(checkup_date) == DATETIME_TYPE: 
                 delta_t = relativedelta.relativedelta(checkup_date, current_time_obj)
@@ -234,7 +233,7 @@ class logger:
                 # It is not in the past.  Put it in the new list.
                 new_notified_list.append(entry)
         # Replace the original list with the new one.
-        self.UID_file_entries = new_notified_list
+        self.already_notified = new_notified_list
 
         return 0
 
@@ -251,7 +250,7 @@ class logger:
         # Write remaining entries to the file.
         try:
             pickle_file = open(ALREADY_NOTIFIED_FILE_NAME, "wb")
-            pickle.dump(self.UID_file_entries, pickle_file)
+            pickle.dump(self.already_notified, pickle_file)
             pickle_file.close()
         except:
             pickle_file.close()
@@ -270,7 +269,7 @@ class logger:
 Logger = logger(ALREADY_NOTIFIED_FILE_NAME)
 
 debug_print("Already notified: ")
-debug_print(Logger.UID_file_entries)
+debug_print(Logger.already_notified)
 
 # Read the ical-standard file.
 pnc_cal = Calendar.from_ical(open(ICS_FILE_NAME,'rb').read())
@@ -368,19 +367,19 @@ for component in pnc_cal.walk():
             else:
                 # Already notified in a previous execution.
                 pass
-                debug_print("NOT SENDING.")
+                debug_print("Already notified mom about this checkup.  NOT SENDING.")
 
 
         if DEBUGGING:
             raw_input("debugging: press enter")
 
 debug_print("Finished scanning calendar.")
-debug_print(Logger.UID_file_entries)
+debug_print(Logger.already_notified)
 #Logger.prune_old_entries()  # NOT NECESSARY; it is done in the write_out.
 # Write the updated file of moms who were notified already.
 Logger.write_out()
 debug_print("Already notified: ")
-debug_print(Logger.UID_file_entries)
+debug_print(Logger.already_notified)
 
 
 
